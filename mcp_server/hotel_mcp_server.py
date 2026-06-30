@@ -120,6 +120,32 @@ def get_housekeeping_status() -> dict:
 
 
 @mcp.tool()
+def get_room_details(room_number: int) -> dict:
+    """Get status details (status, housekeeping assignments, etc.) for a specific room."""
+    state = load_hotel_state()
+    rooms = state.get("rooms", [])
+    
+    room_info = {}
+    for r in rooms:
+        if r.get("room_number") == room_number:
+            room_info = dict(r)
+            break
+            
+    if not room_info:
+        return {"error": f"Room {room_number} not found."}
+        
+    # Check housekeeping tasks
+    tasks = state.get("housekeeping_tasks", [])
+    room_info["housekeeping_task"] = next((t for t in tasks if t.get("room_number") == room_number), None)
+    
+    # Check open maintenance tickets
+    tickets = state.get("maintenance_tickets", [])
+    room_info["maintenance_tickets"] = [t for t in tickets if t.get("room_number") == room_number]
+    
+    return clean_data(room_info)
+
+
+@mcp.tool()
 def get_maintenance_tickets(status_filter: str | None = None) -> list:
     """Get maintenance tickets, optionally filtered by status ('open', 'closed', 'resolved', 'in_progress')."""
     state = load_hotel_state()
