@@ -1,3 +1,12 @@
+"""Hotel Operations local MCP Server.
+
+This server exposes PMS (Property Management System) operational tools to the ADK agent.
+Each tool reads from `data/hotel_state.json`. Before any returned dictionaries are passed
+to the standard I/O (stdio) transport, their text contents are run through the `clean_data()`
+sanitizer to ensure no sensitive customer PII or potential prompt injection commands
+leak into the model context.
+"""
+
 import json
 import os
 from datetime import date, datetime
@@ -7,9 +16,10 @@ from mcp.server.fastmcp import FastMCP
 
 from mcp_server.security import redact_pii, screen_for_injection
 
-# Define the FastMCP server
+# Initialize the FastMCP wrapper using standard input/output transport
 mcp = FastMCP("Hotel Operations Server")
 
+# Resolve absolute path to the local PMS state json file
 DATA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data",
@@ -18,13 +28,17 @@ DATA_PATH = os.path.join(
 
 
 def load_hotel_state() -> dict:
-    """Helper to load hotel state JSON."""
+    """Helper to load hotel state JSON from disk."""
     with open(DATA_PATH) as f:
         return json.load(f)
 
 
 def clean_data(data: Any) -> Any:
-    """Recursively clean free-text fields (guest_comment, issue_description) in data."""
+    """Recursively clean sensitive data from free-text fields.
+
+    This ensures fields like guest comment or issue description are sanitized
+    prior to returning. This central function enforces the data security boundary.
+    """
     if isinstance(data, dict):
         cleaned = {}
         for k, v in data.items():
@@ -45,12 +59,17 @@ def clean_data(data: Any) -> Any:
 
 @mcp.tool()
 def get_occupancy_summary() -> dict:
-    """Get the current room occupancy statistics and guest comments."""
+    """Get the current room occupancy statistics and guest comments.
+
+    Returns metrics including total, occupied, and available rooms, today's arrivals,
+    and returns a list of comments for current or upcoming (within 3 days) guests
+    to help managers plan arrivals. All comments are sanitized.
+    """
     state = load_hotel_state()
     rooms = state.get("rooms", [])
     total_rooms = len(rooms)
 
-    # Calculate occupancy from reservations and rooms
+    # Calculate current occupancy state from reservations list
     reservations = state.get("reservations", [])
     occupied_rooms = len([r for r in reservations if r.get("status") == "in_house"])
     reservations_today = len(
@@ -61,7 +80,7 @@ def get_occupancy_summary() -> dict:
     )
     available_rooms = total_rooms - occupied_rooms
 
-    # Hotel current date is 2026-06-30 (from JSON)
+    # Today is anchored to 2026-06-30 for simulation stability
     current_date = date(2026, 6, 30)
 
     guest_comments = []
@@ -107,7 +126,12 @@ def get_occupancy_summary() -> dict:
 
 @mcp.tool()
 def get_housekeeping_status() -> dict:
-    """Get the housekeeping count breakdown for all statuses present in the data."""
+    """Aggregate room status counts across all rooms.
+
+    Provides the agent with a complete operational summary of housekeeping categories
+    (clean, dirty, inspected, out_of_order, in_progress) without overloading context
+    with individual room records.
+    """
     state = load_hotel_state()
     rooms = state.get("rooms", [])
 
@@ -121,7 +145,11 @@ def get_housekeeping_status() -> dict:
 
 @mcp.tool()
 def get_room_details(room_number: int) -> dict:
-    """Get status details (status, housekeeping assignments, etc.) for a specific room."""
+    """Inspect status, housekeeping tasks, and maintenance tickets for a specific room.
+
+    Added as an iteration fix: this single-point tool enables the agent to cross-reference
+    specific room anomalies (e.g. VIP guest assigned to out-of-order room 404) directly.
+    """
     state = load_hotel_state()
     rooms = state.get("rooms", [])
     
@@ -147,7 +175,11 @@ def get_room_details(room_number: int) -> dict:
 
 @mcp.tool()
 def get_maintenance_tickets(status_filter: str | None = None) -> list:
-    """Get maintenance tickets, optionally filtered by status ('open', 'closed', 'resolved', 'in_progress')."""
+    """Get active maintenance tickets, optionally filtered by status.
+
+    Returns the ticket lists containing room numbers, descriptions, and priorities.
+    Helps the agent check for open issues that conflict with guest arrivals.
+    """
     state = load_hotel_state()
     tickets = state.get("maintenance_tickets", [])
     if status_filter:
@@ -157,7 +189,11 @@ def get_maintenance_tickets(status_filter: str | None = None) -> list:
 
 @mcp.tool()
 def get_staffing_levels() -> list:
-    """Get list of current on-shift/off-shift staffing detail information."""
+    """Get the full list of staff shift schedules and current status.
+
+    Returns roster details (name, role, shift, status) enabling the agent to detect
+    if off-duty staff members have been assigned active cleaning/maintenance tasks.
+    """
     state = load_hotel_state()
     return clean_data(state.get("staffing", []))
 
