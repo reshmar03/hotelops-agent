@@ -156,18 +156,10 @@ def get_maintenance_tickets(status_filter: str | None = None) -> list:
 
 
 @mcp.tool()
-def get_staffing_levels() -> dict:
-    """Get current on-shift staffing levels by department."""
+def get_staffing_levels() -> list:
+    """Get list of current on-shift/off-shift staffing detail information."""
     state = load_hotel_state()
-    staffing_list = state.get("staffing", [])
-
-    levels = {}
-    for member in staffing_list:
-        if member.get("status") == "on_duty":
-            role = member.get("role")
-            levels[role] = levels.get(role, 0) + 1
-
-    return levels
+    return clean_data(state.get("staffing", []))
 
 
 if __name__ == "__main__":
